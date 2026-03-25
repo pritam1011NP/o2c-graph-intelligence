@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>O2C Graph — Order to Cash Intelligence</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #09090f;
+    --surface: #111118;
+    --surface2: #16161f;
+    --border: #252535;
+    --border2: #2d2d45;
+    --text: #e8e8f0;
+    --muted: #6b6b8a;
+    --accent: #6c63ff;
+    --accent2: #a78bfa;
+    --order: #3b82f6;
+    --delivery: #10b981;
+    --billing: #f59e0b;
+    --journal: #ef4444;
+    --customer: #8b5cf6;
+    --glow: rgba(108, 99, 255, 0.15);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; }
+
+  /* ── Layout ── */
+  .app { display: flex; flex-direction: column; height: 100vh; }
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 20px; height: 52px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; z-index: 10;
+  }
+  .logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 18px;
+    letter-spacing: -0.5px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .logo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .breadcrumb { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .breadcrumb span { color: var(--text); }
+  .stats-bar { display: flex; gap: 16px; margin-left: auto; }
+  .stat-pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    font-size: 12px; font-family: 'DM Mono', monospace; }
+  .stat-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Graph Panel ── */
+  .graph-panel { flex: 1; position: relative; overflow: hidden; }
+  #graph-svg { width: 100%; height: 100%; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 380px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--surface); border-left: 1px solid var(--border);
+  }
+
+  /* ── Chat ── */
+  .chat-header {
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chat-header .live-dot { width: 7px; height: 7px; border-radius: 50%;
+    background: #10b981; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(16,185,129,.4)} 50%{opacity:.8;box-shadow:0 0 0 6px rgba(16,185,129,0)} }
+
+  .messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .messages::-webkit-scrollbar { width: 4px; }
+  .messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .msg { display: flex; flex-direction: column; gap: 4px; }
+  .msg.user { align-items: flex-end; }
+  .msg.assistant { align-items: flex-start; }
+  .msg-bubble {
+    max-width: 90%; padding: 10px 13px; border-radius: 12px;
+    font-size: 13px; line-height: 1.55;
+  }
+  .msg.user .msg-bubble {
+    background: var(--accent); color: #fff; border-bottom-right-radius: 3px;
+    font-weight: 500;
+  }
+  .msg.assistant .msg-bubble {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-bottom-left-radius: 3px; white-space: pre-wrap;
+  }
+  .msg-bubble strong { color: var(--accent2); }
+  .msg-bubble code { font-family: 'DM Mono', monospace; background: rgba(255,255,255,.05);
+    padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+
+  .sql-block {
+    margin-top: 8px; padding: 8px 10px; background: rgba(0,0,0,.4);
+    border: 1px solid var(--border); border-radius: 6px;
+    font-family: 'DM Mono', monospace; font-size: 11px; color: #94a3b8;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 120px; overflow-y: auto; cursor: pointer;
+  }
+  .sql-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 3px; }
+
+  .results-table { margin-top: 8px; overflow-x: auto; max-height: 160px; overflow-y: auto; }
+  .results-table table { border-collapse: collapse; font-size: 11px; font-family: 'DM Mono', monospace; width: 100%; }
+  .results-table th { background: rgba(108,99,255,.15); color: var(--accent2); padding: 4px 8px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; position: sticky; top: 0; }
+  .results-table td { padding: 3px 8px; border-bottom: 1px solid var(--border); color: #94a3b8; white-space: nowrap; }
+  .results-table tr:hover td { background: rgba(255,255,255,.02); }
+
+  .typing { display: flex; align-items: center; gap: 5px; padding: 10px 13px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 12px; width: fit-content; }
+  .typing span { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); animation: bounce 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+
+  .input-area { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  .query-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip {
+    padding: 4px 9px; border: 1px solid var(--border2); border-radius: 20px;
+    font-size: 11px; cursor: pointer; color: var(--muted);
+    transition: all .15s; white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .input-row { display: flex; gap: 8px; }
+  .input-row input {
+    flex: 1; padding: 9px 13px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 13px; font-family: 'Inter', sans-serif;
+    outline: none; transition: border .15s;
+  }
+  .input-row input:focus { border-color: var(--accent); }
+  .input-row input::placeholder { color: var(--muted); }
+  .send-btn {
+    padding: 9px 16px; background: var(--accent); border: none; border-radius: 8px;
+    color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: all .15s; font-family: 'Syne', sans-serif; white-space: nowrap;
+  }
+  .send-btn:hover { background: #5b52e8; transform: translateY(-1px); }
+  .send-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+  /* ── Node Detail Panel ── */
+  .node-detail {
+    position: absolute; top: 12px; left: 12px; width: 280px;
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: 10px; padding: 14px; display: none; z-index: 5;
+    max-height: calc(100vh - 80px); overflow-y: auto;
+  }
+  .node-detail.visible { display: block; }
+  .node-detail::-webkit-scrollbar { width: 3px; }
+  .node-detail::-webkit-scrollbar-thumb { background: var(--border2); }
+  .node-detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .node-type-badge { padding: 3px 8px; border-radius: 4px; font-size: 10px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: .5px; font-family: 'DM Mono', monospace; }
+  .close-btn { cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; }
+  .close-btn:hover { color: var(--text); }
+  .detail-section { margin-bottom: 10px; }
+  .detail-section h4 { font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin-bottom: 6px; font-family: 'DM Mono', monospace; }
+  .kv-row { display: flex; gap: 8px; margin-bottom: 3px; font-size: 12px; }
+  .kv-key { color: var(--muted); flex-shrink: 0; max-width: 120px; font-family: 'DM Mono', monospace; font-size: 11px; }
+  .kv-val { color: var(--text); word-break: break-all; font-size: 11px; }
+
+  /* ── Graph controls ── */
+  .graph-controls {
+    position: absolute; bottom: 16px; right: 16px;
+    display: flex; flex-direction: column; gap: 6px; z-index: 5;
+  }
+  .ctrl-btn {
+    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer; color: var(--muted); font-size: 16px; transition: all .15s;
+  }
+  .ctrl-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; z-index: 5;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .legend-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 2px; }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── Loading ── */
+  .loading-overlay {
+    position: absolute; inset: 0; background: var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; z-index: 100; transition: opacity .5s;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .loading-logo { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 28px; }
+  .loading-bar { width: 200px; height: 2px; background: var(--border); border-radius: 1px; overflow: hidden; }
+  .loading-bar-fill { height: 100%; background: var(--accent); border-radius: 1px; animation: load 1.5s ease forwards; }
+  @keyframes load { from{width:0} to{width:100%} }
+  .loading-text { font-size: 13px; color: var(--muted); }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute; padding: 6px 10px; background: var(--surface2);
+    border: 1px solid var(--border2); border-radius: 6px;
+    font-size: 11px; font-family: 'DM Mono', monospace; pointer-events: none;
+    z-index: 20; color: var(--text); white-space: nowrap;
+    display: none;
+  }
+
+  .highlighted-node circle { filter: drop-shadow(0 0 8px currentColor); }
+</style>
+</head>
+<body>
+<div class="loading-overlay" id="loading">
+  <div class="loading-logo">O2C<span style="color:var(--accent)">.</span>Graph</div>
+  <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+  <div class="loading-text">Building knowledge graph…</div>
+</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="logo"><div class="dot"></div> O2C Graph</div>
+    <div class="breadcrumb">/ <span>Order to Cash Intelligence</span></div>
+    <div class="stats-bar" id="stats-bar">
+      <!-- filled by JS -->
+    </div>
+  </div>
+  <div class="main">
+    <div class="graph-panel">
+      <svg id="graph-svg"></svg>
+
+      <!-- Node detail panel -->
+      <div class="node-detail" id="node-detail">
+        <div class="node-detail-header">
+          <span class="node-type-badge" id="detail-badge">Node</span>
+          <span class="close-btn" onclick="closeDetail()">×</span>
+        </div>
+        <div id="detail-body"></div>
+      </div>
+
+      <!-- Legend -->
+      <div class="legend">
+        <div class="legend-title">Entity Types</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--order)"></div>Sales Order</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--delivery)"></div>Delivery</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--billing)"></div>Billing Doc</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--journal)"></div>Journal Entry</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--customer)"></div>Customer</div>
+      </div>
+
+      <!-- Graph controls -->
+      <div class="graph-controls">
+        <div class="ctrl-btn" onclick="zoomIn()" title="Zoom In">+</div>
+        <div class="ctrl-btn" onclick="zoomOut()" title="Zoom Out">−</div>
+        <div class="ctrl-btn" onclick="resetZoom()" title="Reset">⊙</div>
+      </div>
+
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+
+    <!-- Sidebar: Chat -->
+    <div class="sidebar">
+      <div class="chat-header">
+        <div class="live-dot"></div>
+        Chat with Graph
+        <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:auto">Order to Cash</span>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="msg assistant">
+          <div class="msg-bubble">
+            👋 Hi! I can help you analyze the <strong>Order to Cash</strong> process.<br><br>
+            Ask me about sales orders, deliveries, billing documents, journal entries, customers, or products. I'll query the live dataset and show you real results.
+          </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div class="query-chips">
+          <div class="chip" onclick="sendChip(this)">Top billed products</div>
+          <div class="chip" onclick="sendChip(this)">Incomplete O2C flows</div>
+          <div class="chip" onclick="sendChip(this)">Trace billing doc 90504204</div>
+          <div class="chip" onclick="sendChip(this)">Cancelled invoices</div>
+          <div class="chip" onclick="sendChip(this)">List all customers</div>
+          <div class="chip" onclick="sendChip(this)">Revenue by customer</div>
+        </div>
+        <div class="input-row">
+          <input type="text" id="chat-input" placeholder="Ask anything about the O2C data…" onkeydown="if(event.key==='Enter')sendMessage()">
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';  // same origin
+let graphData = { nodes: [], edges: [] };
+let simulation, svg, zoomBehavior, g;
+let highlightedNodes = new Set();
+let conversationHistory = [];
+
+const nodeColors = {
+  SalesOrder: 'var(--order)',
+  Delivery: 'var(--delivery)',
+  BillingDoc: 'var(--billing)',
+  JournalEntry: 'var(--journal)',
+  Customer: 'var(--customer)',
+};
+
+const nodeRadii = {
+  SalesOrder: 9,
+  Delivery: 8,
+  BillingDoc: 8,
+  JournalEntry: 7,
+  Customer: 12,
+};
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const r = await fetch(`${API}/api/stats`);
+  const stats = await r.json();
+  const bar = document.getElementById('stats-bar');
+  const items = [
+    { label: 'Sales Orders', val: stats.sales_orders, color: 'var(--order)' },
+    { label: 'Deliveries', val: stats.deliveries, color: 'var(--delivery)' },
+    { label: 'Billing Docs', val: stats.billing_docs, color: 'var(--billing)' },
+    { label: 'Journal Entries', val: stats.journal_entries, color: 'var(--journal)' },
+    { label: 'Customers', val: stats.customers, color: 'var(--customer)' },
+  ];
+  bar.innerHTML = items.map(i => `
+    <div class="stat-pill">
+      <div class="dot" style="background:${i.color}"></div>
+      <strong style="color:var(--text)">${i.val}</strong>
+      <span style="color:var(--muted)">${i.label}</span>
+    </div>
+  `).join('');
+}
+
+// ── Graph ────────────────────────────────────────────────────────────────────
+async function loadGraph() {
+  const r = await fetch(`${API}/api/graph/nodes`);
+  graphData = await r.json();
+  renderGraph();
+}
+
+function renderGraph() {
+  const el = document.getElementById('graph-svg');
+  const W = el.clientWidth, H = el.clientHeight;
+
+  d3.select('#graph-svg').selectAll('*').remove();
+
+  svg = d3.select('#graph-svg');
+  zoomBehavior = d3.zoom().scaleExtent([0.1, 4]).on('zoom', e => g.attr('transform', e.transform));
+  svg.call(zoomBehavior);
+
+  g = svg.append('g');
+
+  // Marker (arrow)
+  svg.append('defs').append('marker')
+    .attr('id', 'arrow')
+    .attr('viewBox', '0 -4 8 8')
+    .attr('refX', 18).attr('refY', 0)
+    .attr('markerWidth', 5).attr('markerHeight', 5)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-4L8,0L0,4')
+    .attr('fill', '#2d2d45');
+
+  const links = graphData.edges.map(e => ({...e}));
+  const nodes = graphData.nodes.map(n => ({...n}));
+  const nodeMap = {};
+  nodes.forEach(n => nodeMap[n.id] = n);
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
+      if (d.label === 'placed') return 120;
+      return 80;
+    }).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('collision', d3.forceCollide(20))
+    .alphaDecay(0.02);
+
+  const link = g.append('g').selectAll('line')
+    .data(links).join('line')
+    .attr('stroke', '#2d2d45').attr('stroke-width', 1)
+    .attr('marker-end', 'url(#arrow)').attr('opacity', .6);
+
+  const node = g.append('g').selectAll('g')
+    .data(nodes).join('g')
+    .attr('class', 'node')
+    .attr('cursor', 'pointer')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag', (e, d) => { d.fx=e.x; d.fy=e.y; })
+      .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }))
+    .on('click', (e, d) => { e.stopPropagation(); showNodeDetail(d); })
+    .on('mouseover', (e, d) => showTooltip(e, d))
+    .on('mousemove', (e) => moveTooltip(e))
+    .on('mouseout', hideTooltip);
+
+  node.append('circle')
+    .attr('r', d => nodeRadii[d.type] || 8)
+    .attr('fill', d => nodeColors[d.type] || '#666')
+    .attr('fill-opacity', .85)
+    .attr('stroke', d => nodeColors[d.type] || '#666')
+    .attr('stroke-width', 1.5)
+    .attr('stroke-opacity', .4);
+
+  // Labels for customer nodes (bigger)
+  node.filter(d => d.type === 'Customer').append('text')
+    .attr('dy', 20).attr('text-anchor', 'middle')
+    .attr('fill', 'var(--muted)').attr('font-size', '9px')
+    .attr('font-family', 'DM Mono, monospace')
+    .text(d => d.label.length > 16 ? d.label.substring(0, 14) + '…' : d.label);
+
+  svg.on('click', () => closeDetail());
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  // Stop loading overlay
+  setTimeout(() => {
+    document.getElementById('loading').classList.add('hidden');
+  }, 1800);
+}
+
+function highlightNodes(ids) {
+  highlightedNodes = new Set(ids);
+  d3.selectAll('.node circle')
+    .transition().duration(300)
+    .attr('r', d => highlightedNodes.has(d.id) ? (nodeRadii[d.type] || 8) * 1.8 : (nodeRadii[d.type] || 8))
+    .attr('stroke-width', d => highlightedNodes.has(d.id) ? 3 : 1.5)
+    .attr('stroke-opacity', d => highlightedNodes.has(d.id) ? 1 : 0.4)
+    .attr('fill-opacity', d => {
+      if (highlightedNodes.size === 0) return 0.85;
+      return highlightedNodes.has(d.id) ? 1 : 0.25;
+    });
+}
+
+function zoomIn() { svg.transition().call(zoomBehavior.scaleBy, 1.4); }
+function zoomOut() { svg.transition().call(zoomBehavior.scaleBy, 0.7); }
+function resetZoom() { svg.transition().call(zoomBehavior.transform, d3.zoomIdentity); }
+
+// ── Tooltip ──────────────────────────────────────────────────────────────────
+function showTooltip(e, d) {
+  const t = document.getElementById('tooltip');
+  t.style.display = 'block';
+  t.textContent = `${d.type}: ${d.label}`;
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  const t = document.getElementById('tooltip');
+  t.style.left = (e.offsetX + 12) + 'px';
+  t.style.top = (e.offsetY - 28) + 'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ── Node Detail ───────────────────────────────────────────────────────────────
+async function showNodeDetail(d) {
+  const panel = document.getElementById('node-detail');
+  const badge = document.getElementById('detail-badge');
+  const body = document.getElementById('detail-body');
+
+  badge.textContent = d.type;
+  badge.style.background = (nodeColors[d.type] || '#666') + '33';
+  badge.style.color = nodeColors[d.type] || '#666';
+  body.innerHTML = '<div style="color:var(--muted);font-size:12px">Loading…</div>';
+  panel.classList.add('visible');
+
+  try {
+    const r = await fetch(`${API}/api/graph/node/${d.id}`);
+    const detail = await r.json();
+    body.innerHTML = renderDetail(d, detail);
+  } catch (e) {
+    body.innerHTML = renderKV(d.data || {});
+  }
+}
+
+function renderDetail(d, detail) {
+  let html = '';
+  for (const [section, rows] of Object.entries(detail)) {
+    if (!rows || rows.length === 0) continue;
+    html += `<div class="detail-section">
+      <h4>${section.replace(/_/g,' ')}</h4>
+      ${rows.map(row => renderKV(row)).join('<hr style="border:none;border-top:1px solid var(--border);margin:6px 0">')}
+    </div>`;
+  }
+  return html || renderKV(d.data || {});
+}
+
+function renderKV(obj) {
+  return Object.entries(obj).filter(([k,v]) => v !== null && v !== '' && v !== 'None')
+    .map(([k,v]) => `<div class="kv-row"><span class="kv-key">${k}</span><span class="kv-val">${v}</span></div>`)
+    .join('');
+}
+
+function closeDetail() {
+  document.getElementById('node-detail').classList.remove('visible');
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+function sendChip(el) {
+  document.getElementById('chat-input').value = el.textContent;
+  sendMessage();
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  input.value = '';
+
+  appendMessage('user', msg);
+  const typing = appendTyping();
+
+  // Update history for multi-turn
+  conversationHistory.push({ role: 'user', content: msg });
+
+  try {
+    const r = await fetch(`${API}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: conversationHistory.slice(-6) })
+    });
+    const data = await r.json();
+
+    typing.remove();
+    appendMessage('assistant', data.answer, data.sql, data.results);
+
+    conversationHistory.push({ role: 'assistant', content: data.answer });
+
+    // Highlight relevant nodes
+    if (data.highlighted_nodes && data.highlighted_nodes.length > 0) {
+      highlightNodes(data.highlighted_nodes);
+    }
+  } catch(e) {
+    typing.remove();
+    appendMessage('assistant', 'Error: ' + e.message);
+  }
+
+  btn.disabled = false;
+  input.focus();
+}
+
+function appendMessage(role, text, sql, results) {
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+
+  let inner = `<div class="msg-bubble">${formatText(text)}</div>`;
+
+  if (sql) {
+    inner += `<div class="sql-block"><div class="sql-label">SQL Query</div>${escapeHtml(sql)}</div>`;
+  }
+
+  if (results && results.length > 0) {
+    const cols = Object.keys(results[0]);
+    inner += `<div class="results-table"><table>
+      <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${results.slice(0,20).map(row=>
+        `<tr>${cols.map(c=>`<td>${row[c]??''}</td>`).join('')}</tr>`
+      ).join('')}</tbody>
+    </table></div>`;
+    if (results.length > 20) {
+      inner += `<div style="font-size:11px;color:var(--muted);margin-top:4px">Showing 20 of ${results.length} rows</div>`;
+    }
+  }
+
+  div.innerHTML = inner;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function appendTyping() {
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+  div.innerHTML = `<div class="typing"><span></span><span></span><span></span></div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function formatText(text) {
+  // Bold **text**
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Inline code `code`
+  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bullet points
+  text = text.replace(/^• (.+)/gm, '<span style="display:block;padding-left:12px">• $1</span>');
+  text = text.replace(/^- (.+)/gm, '<span style="display:block;padding-left:12px">• $1</span>');
+  // Newlines
+  text = text.replace(/\n/g, '<br>');
+  return text;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  await Promise.all([loadStats(), loadGraph()]);
+})();
+</script>
+</body>
+</html>
